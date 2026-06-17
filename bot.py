@@ -10,7 +10,7 @@ import google.generativeai as genai
 
 # ================= AI =================
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-1.5-pro")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 LIMIT = 40
