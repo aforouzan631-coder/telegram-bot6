@@ -1,25 +1,13 @@
 import os
 import sqlite3
 import random
-import google.generativeai as genai
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# ================= AI =================
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-pro")
-
+# TOKEN
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ================= DB =================
+# DB
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 c = conn.cursor()
 
@@ -32,111 +20,51 @@ CREATE TABLE IF NOT EXISTS users(
 """)
 conn.commit()
 
-
-def get_user(uid):
-    c.execute("SELECT * FROM users WHERE user_id=?", (uid,))
-    if not c.fetchone():
-        c.execute("INSERT INTO users(user_id) VALUES(?)", (uid,))
-        conn.commit()
-
-
-def add_balance(uid, amount):
-    c.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, uid))
-    conn.commit()
-
-
-def set_vip(uid):
-    c.execute("UPDATE users SET vip=1 WHERE user_id=?", (uid,))
-    conn.commit()
-
-
-def is_vip(uid):
-    c.execute("SELECT vip FROM users WHERE user_id=?", (uid,))
-    return c.fetchone()[0] == 1
-
-
-# ================= UI =================
-def menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 AI Chat", callback_data="ai")],
-        [InlineKeyboardButton("💰 Wallet", callback_data="wallet")],
-        [InlineKeyboardButton("💎 VIP", callback_data="vip")],
-        [InlineKeyboardButton("🔗 Invite", callback_data="invite")],
-    ])
-
-
-# ================= COMMAND =================
+# ---------- START ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    get_user(uid)
-
+    keyboard = [
+        [InlineKeyboardButton("💰 کیف پول", callback_data="wallet")],
+        [InlineKeyboardButton("🎮 بازی", callback_data="game")],
+        [InlineKeyboardButton("💎 VIP", callback_data="vip")],
+    ]
     await update.message.reply_text(
-        "سلام 👋 به ربات خوش اومدی",
-        reply_markup=menu()
+        "👋 سلام به ربات امیر علی فروزان",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
-# ================= BUTTONS =================
+# ---------- BUTTONS ----------
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+
     uid = q.from_user.id
-    get_user(uid)
 
-    if q.data == "ai":
-        context.user_data["ai"] = True
-        await q.message.reply_text("💬 حالا پیام بفرست برای AI")
+    c.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (uid,))
+    conn.commit()
 
-    elif q.data == "wallet":
+    if q.data == "wallet":
         c.execute("SELECT balance FROM users WHERE user_id=?", (uid,))
         bal = c.fetchone()[0]
         await q.message.reply_text(f"💰 موجودی شما: {bal}")
 
+    elif q.data == "game":
+        reward = round(random.uniform(0.001, 0.01), 4)
+
+        c.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (reward, uid))
+        conn.commit()
+
+        await q.message.reply_text(f"🎮 بردی: +{reward}")
+
     elif q.data == "vip":
-        set_vip(uid)
-        await q.message.reply_text("💎 VIP فعال شد!")
+        c.execute("UPDATE users SET vip = 1 WHERE user_id=?", (uid,))
+        conn.commit()
 
-    elif q.data == "invite":
-        await q.message.reply_text(
-            "🔗 لینک دعوت:\nhttps://t.me/your_bot"
-        )
+        await q.message.reply_text("💎 VIP فعال شد")
 
-
-# ================= AI CHAT =================
-def ask_ai(text):
-    try:
-        return model.generate_content(text).text
-    except:
-        return "❌ خطا در AI"
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    get_user(uid)
-
-    if context.user_data.get("ai"):
-        if not is_vip(uid):
-            await update.message.reply_text("❌ فقط VIP می‌تواند استفاده کند")
-            return
-
-        reply = ask_ai(update.message.text)
-        await update.message.reply_text(reply)
-        return
-
-    # ================= GAME =================
-    reward = random.uniform(0.001, 0.01)
-    if is_vip(uid):
-        reward *= 2
-
-    add_balance(uid, reward)
-    await update.message.reply_text(f"🎮 +{reward:.4f} تومان اضافه شد")
-
-
-# ================= RUN =================
-app = Application.builder().token(BOT_TOKEN).build()
+# ---------- RUN ----------
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(buttons))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 app.run_polling()
